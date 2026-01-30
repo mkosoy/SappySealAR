@@ -71,6 +71,11 @@ let anchorGamma = 0;
 let currentBeta = 0;
 let currentGamma = 0;
 
+// AR tank positioning - tank stays fixed in world space
+let anchorScreenX = 0;
+let anchorScreenY = 0;
+const AR_SENSITIVITY = 6;  // How much tank moves per degree of tilt
+
 // Collections
 const collectibles = [];
 const puffers = [];
@@ -86,7 +91,7 @@ let targetX, targetY;
 let sealRotation = 0;
 let sealLane = LANES.MIDDLE;  // Current depth lane
 const SEAL_SMOOTHING = 0.12;
-const TILT_SENSITIVITY = 8;
+const TILT_SENSITIVITY = 12;  // Increased for more responsive seal movement
 
 // Status effects
 let isStuck = false;
@@ -301,6 +306,12 @@ function handlePlacementTap() {
   anchorGamma = currentGamma;
   isAnchored = true;
 
+  // Save initial tank screen position (center of screen when anchored)
+  anchorScreenX = canvas.width / 2;
+  anchorScreenY = canvas.height / 2;
+  tankCenterX = anchorScreenX;
+  tankCenterY = anchorScreenY;
+
   // Hide placement overlay
   placementOverlay.style.display = 'none';
 
@@ -320,6 +331,12 @@ function setupDeviceOrientation() {
     if (isAnchored) {
       relativeGamma = currentGamma - anchorGamma;
       relativeBeta = currentBeta - anchorBeta;
+
+      // AR positioning: Move tank opposite to tilt direction
+      // Tilt right → tank moves left (you're looking right of where tank is)
+      // Tilt forward → tank moves up (you're looking below where tank is)
+      tankCenterX = anchorScreenX - (relativeGamma * AR_SENSITIVITY);
+      tankCenterY = anchorScreenY - (relativeBeta * AR_SENSITIVITY);
     }
 
     // Update parallax (legacy)
@@ -330,15 +347,17 @@ function setupDeviceOrientation() {
     tankRotationY = Math.max(-25, Math.min(25, relativeGamma)) * Math.PI / 180;
     tankRotationX = Math.max(-15, Math.min(15, relativeBeta)) * Math.PI / 180;
 
-    // Update seal lane based on forward/back tilt (beta)
+    // Update seal lane based on forward/back tilt (beta) - only for large tilts
     updateSealLane(relativeBeta);
 
     if (!gameRunning || isPaused || isFrozen) return;
 
     // Update seal target position within tank bounds
+    // Seal moves relative to tank center (which is now AR-positioned)
     const tankHalfW = (FISHTANK.width / 2 - 40) * tankScale;
     const tankHalfH = (FISHTANK.height / 2 - 40) * tankScale;
 
+    // Use smaller portion of tilt for seal movement within tank
     targetX = tankCenterX + (relativeGamma * TILT_SENSITIVITY);
     targetY = tankCenterY + (relativeBeta * TILT_SENSITIVITY);
 
@@ -354,9 +373,10 @@ function updateSealLane(relativeBeta) {
 
   // Phone tilted away (positive beta) = back lane
   // Phone tilted toward (negative beta) = front lane
-  if (relativeBeta > 15) {
+  // Threshold increased to 25 degrees so small tilts move seal, large tilts change lanes
+  if (relativeBeta > 25) {
     sealLane = LANES.BACK;
-  } else if (relativeBeta < -15) {
+  } else if (relativeBeta < -25) {
     sealLane = LANES.FRONT;
   } else {
     sealLane = LANES.MIDDLE;
@@ -1150,9 +1170,12 @@ function cleanupOffscreen() {
 function gameLoop() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  // Update tank center on resize
-  tankCenterX = canvas.width / 2;
-  tankCenterY = canvas.height / 2;
+  // NOTE: Tank center is now controlled by device orientation for AR effect
+  // Only set to screen center if not yet anchored (during placement preview)
+  if (!isAnchored) {
+    tankCenterX = canvas.width / 2;
+    tankCenterY = canvas.height / 2;
+  }
 
   if (gameRunning && !isPaused) {
     updateSeal();
