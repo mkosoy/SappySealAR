@@ -74,7 +74,7 @@ let currentGamma = 0;
 // AR tank positioning - tank stays fixed in world space
 let anchorScreenX = 0;
 let anchorScreenY = 0;
-const AR_SENSITIVITY = 6;  // How much tank moves per degree of tilt
+const AR_SENSITIVITY = 10;  // How much tank moves per degree of tilt (higher = more responsive AR)
 
 // Debug: track if orientation events are firing
 let orientationEventCount = 0;
@@ -490,13 +490,12 @@ function startGame() {
   gameRunning = true;
   isPaused = false;
 
-  // Reset tank state
-  tankCenterX = canvas.width / 2;
-  tankCenterY = canvas.height / 2;
+  // Reset tank state (but NOT position - that's set by handlePlacementTap for AR)
+  // tankCenterX/Y are already set by handlePlacementTap() before this is called
   tankScale = 1.0;
   deviceDistance = 1.0;
 
-  // Reset seal to tank center and middle lane
+  // Reset seal to current tank center (which is the AR-anchored position)
   sealX = tankCenterX;
   sealY = tankCenterY;
   targetX = sealX;
