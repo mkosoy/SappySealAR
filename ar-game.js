@@ -856,11 +856,8 @@ function drawWithParallax(img, x, y, width, height, layer) {
 
 // Draw entity with lane-based scaling
 function drawEntityWithDepth(type, entity) {
-  // Get lane config for scaling and alpha
-  const lane = entity.lane !== undefined ? entity.lane : LANES.MIDDLE;
-  const laneConfig = LANE_CONFIG[lane];
-  const scale = laneConfig.scale * tankScale;
-  const alpha = laneConfig.alpha;
+  // Simplified: All entities at same scale (single plane game)
+  const scale = 0.9 * tankScale;
 
   // Skip if entity is outside tank bounds
   const tankLeft = tankCenterX - FISHTANK.width / 2 * tankScale;
@@ -868,17 +865,7 @@ function drawEntityWithDepth(type, entity) {
   if (entity.x < tankLeft - 50 || entity.x > tankRight + 50) return;
 
   ctx.save();
-  ctx.globalAlpha = alpha;
-
-  // Apply depth-based filters for clearer lane distinction
-  if (lane === LANES.BACK) {
-    // Back lane: darker, desaturated, blue tint (underwater haze)
-    ctx.filter = 'brightness(0.65) saturate(0.5) sepia(20%) hue-rotate(180deg)';
-  } else if (lane === LANES.FRONT) {
-    // Front lane: brighter, more saturated
-    ctx.filter = 'brightness(1.15) saturate(1.3)';
-  }
-  // Middle lane: no filter
+  ctx.globalAlpha = 1.0;  // Full opacity for all entities
 
   switch (type) {
     case 'backfish':
@@ -1075,9 +1062,9 @@ function drawScorePopups() {
 
 // ============ COLLISIONS ============
 
-// Check if entity is in same lane as seal
+// Simplified: All entities in same plane, no lane check needed
 function inSameLane(entityLane) {
-  return entityLane === sealLane;
+  return true;  // Always collide - single plane game
 }
 
 function checkCollisions() {
@@ -1209,24 +1196,11 @@ function cleanupOffscreen() {
 function gameLoop() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  // NOTE: Tank center is now controlled by device orientation for AR effect
-  // Only set to screen center if not yet anchored (during placement preview)
-  if (!isAnchored) {
-    tankCenterX = canvas.width / 2;
-    tankCenterY = canvas.height / 2;
-  }
+  // Tank always at screen center (simplified - no AR positioning)
+  tankCenterX = canvas.width / 2;
+  tankCenterY = canvas.height / 2;
 
-  // DEBUG: Show orientation values to diagnose if events are firing
-  ctx.save();
-  ctx.fillStyle = 'rgba(0,0,0,0.8)';
-  ctx.fillRect(5, 5, 220, 80);
-  ctx.fillStyle = '#0f0';
-  ctx.font = '12px monospace';
-  ctx.fillText(`beta: ${currentBeta.toFixed(1)}  gamma: ${currentGamma.toFixed(1)}`, 10, 22);
-  ctx.fillText(`events: ${orientationEventCount}  anchored: ${isAnchored}`, 10, 38);
-  ctx.fillText(`tank: (${tankCenterX.toFixed(0)}, ${tankCenterY.toFixed(0)})`, 10, 54);
-  ctx.fillText(`seal target: (${targetX?.toFixed(0) || 0}, ${targetY?.toFixed(0) || 0})`, 10, 70);
-  ctx.restore();
+  // Debug display removed - game simplified to touch controls only
 
   if (gameRunning && !isPaused) {
     updateSeal();
@@ -1319,15 +1293,12 @@ function gameLoop() {
   // Draw all entities in depth order
   allEntities.forEach(item => {
     if (item.type === 'seal') {
-      // Draw seal with rotation, chomp, and lane scaling
+      // Draw seal with rotation and chomp (simplified - no lane scaling)
       if (sealImg.complete) {
-        const laneConfig = LANE_CONFIG[sealLane];
-        const proj = projectWithRotation(sealX, sealY, sealZ);
         ctx.save();
-        ctx.globalAlpha = laneConfig.alpha;
-        ctx.translate(proj.screenX, proj.screenY);
+        ctx.translate(sealX, sealY);
         ctx.rotate(sealRotation);
-        ctx.scale(chompScale * laneConfig.scale * tankScale, chompScale * laneConfig.scale * tankScale);
+        ctx.scale(chompScale * 0.9 * tankScale, chompScale * 0.9 * tankScale);
 
         if (isFrozen) {
           ctx.filter = 'hue-rotate(180deg) brightness(1.2)';
@@ -1349,10 +1320,7 @@ function gameLoop() {
   // Draw fishtank border (on top)
   drawFishtankBorder();
 
-  // Draw lane indicator
-  if (gameRunning) {
-    drawLaneIndicator();
-  }
+  // Lane indicator removed - single plane game now
 
   // Draw score popups (UI layer)
   drawScorePopups();
