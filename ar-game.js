@@ -80,6 +80,15 @@ const AR_SENSITIVITY = 10;  // How much tank moves per degree of tilt (higher = 
 let orientationEventCount = 0;
 let orientationSetupAttempted = false;
 
+// Motion detection - fish scatter from real movement
+let motionCanvas, motionCtx;
+let prevFrameData = null;
+let motionX = 0, motionY = 0;  // Where motion was detected (screen coords)
+let motionIntensity = 0;       // How much motion (0-1)
+const MOTION_THRESHOLD = 30;   // Pixel diff threshold
+const MOTION_DECAY = 0.92;     // How fast motion fades
+let motionFrameSkip = 0;       // Process every N frames for performance
+
 // Collections
 const collectibles = [];
 const puffers = [];
@@ -219,6 +228,89 @@ function init() {
       // Events should auto-resume, but log for debugging
     }
   });
+
+  // Initialize motion detection for AR fish scatter
+  initMotionDetection();
+}
+
+// ============ MOTION DETECTION ============
+// Analyzes camera feed to detect real-world motion
+// Fish will scatter away from detected movement
+
+function initMotionDetection() {
+  motionCanvas = document.createElement('canvas');
+  motionCanvas.width = 160;  // Low res for performance
+  motionCanvas.height = 120;
+  motionCtx = motionCanvas.getContext('2d', { willReadFrequently: true });
+}
+
+function detectMotion() {
+  // Skip frames for performance (process every 3rd frame)
+  motionFrameSkip++;
+  if (motionFrameSkip < 3) {
+    return;
+  }
+  motionFrameSkip = 0;
+
+  // Need video to be playing
+  if (!video || video.readyState < 2) {
+    return;
+  }
+
+  try {
+    // Draw video frame to motion canvas (scaled down for performance)
+    motionCtx.drawImage(video, 0, 0, motionCanvas.width, motionCanvas.height);
+    const currentFrame = motionCtx.getImageData(0, 0, motionCanvas.width, motionCanvas.height);
+
+    if (prevFrameData) {
+      let motionSumX = 0, motionSumY = 0;
+      let motionPixels = 0;
+
+      // Compare frames pixel by pixel
+      for (let i = 0; i < currentFrame.data.length; i += 4) {
+        const diff = Math.abs(currentFrame.data[i] - prevFrameData.data[i]) +
+                     Math.abs(currentFrame.data[i+1] - prevFrameData.data[i+1]) +
+                     Math.abs(currentFrame.data[i+2] - prevFrameData.data[i+2]);
+
+        if (diff > MOTION_THRESHOLD * 3) {
+          const pixelIndex = i / 4;
+          const x = pixelIndex % motionCanvas.width;
+          const y = Math.floor(pixelIndex / motionCanvas.width);
+          motionSumX += x;
+          motionSumY += y;
+          motionPixels++;
+        }
+      }
+
+      if (motionPixels > 80) {  // Significant motion detected
+        // Convert to screen coordinates
+        motionX = (motionSumX / motionPixels) / motionCanvas.width * canvas.width;
+        motionY = (motionSumY / motionPixels) / motionCanvas.height * canvas.height;
+        motionIntensity = Math.min(1, motionPixels / 400);
+      } else {
+        motionIntensity *= MOTION_DECAY;  // Fade out gradually
+      }
+    }
+
+    prevFrameData = currentFrame;
+  } catch (e) {
+    // Video might not be ready yet
+  }
+}
+
+// Apply flee behavior to an entity based on detected motion
+function applyMotionFlee(entity, fleeStrength = 5) {
+  if (motionIntensity < 0.25) return;  // Not enough motion
+
+  const dx = entity.x - motionX;
+  const dy = entity.y - motionY;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+
+  if (dist < 250 && dist > 0) {  // Within flee radius
+    const strength = motionIntensity * (1 - dist / 250) * fleeStrength;
+    entity.x += (dx / dist) * strength;
+    entity.y += (dy / dist) * strength;
+  }
 }
 
 // Touch fallback variables
@@ -1239,10 +1331,13 @@ function gameLoop() {
     tankCenterY = canvas.height / 2;
   }
 
+  // Detect motion in camera feed (for fish scatter effect)
+  detectMotion();
+
   // DEBUG: Show gyroscope status (remove after fixing)
   ctx.save();
   ctx.fillStyle = 'rgba(0,0,0,0.85)';
-  ctx.fillRect(5, 5, 260, 115);
+  ctx.fillRect(5, 5, 260, 130);
   ctx.fillStyle = orientationEventCount > 0 ? '#0f0' : '#f00';
   ctx.font = '12px monospace';
   ctx.fillText(`Gyro: ${orientationEventCount} events ${orientationSetupAttempted ? '(setup OK)' : '(NOT setup)'}`, 10, 22);
@@ -1252,7 +1347,26 @@ function gameLoop() {
   ctx.fillText(`Tank: (${tankCenterX.toFixed(0)}, ${tankCenterY.toFixed(0)})`, 10, 70);
   ctx.fillText(`Anchor: (${anchorScreenX.toFixed(0)}, ${anchorScreenY.toFixed(0)})`, 10, 86);
   ctx.fillText(`Seal: (${sealX?.toFixed(0) || 0}, ${sealY?.toFixed(0) || 0})`, 10, 102);
+  ctx.fillText(`Motion: ${(motionIntensity * 100).toFixed(0)}%`, 10, 118);
   ctx.restore();
+
+  // Visual feedback: Show motion detection area
+  if (motionIntensity > 0.25) {
+    ctx.save();
+    ctx.globalAlpha = motionIntensity * 0.4;
+    ctx.fillStyle = '#ffff00';
+    ctx.beginPath();
+    ctx.arc(motionX, motionY, 30 + motionIntensity * 40, 0, Math.PI * 2);
+    ctx.fill();
+    // Ripple effect
+    ctx.strokeStyle = '#ffff00';
+    ctx.lineWidth = 2;
+    ctx.globalAlpha = motionIntensity * 0.3;
+    ctx.beginPath();
+    ctx.arc(motionX, motionY, 60 + motionIntensity * 60, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
 
   if (gameRunning && !isPaused) {
     updateSeal();
@@ -1263,12 +1377,21 @@ function gameLoop() {
     updateJellyfish();
   }
 
-  // Move entities (X movement)
+  // Move entities (X movement) and apply motion flee
   if (gameRunning && !isPaused) {
-    backFish.forEach(f => f.x -= f.speed);
-    collectibles.forEach(c => c.x -= c.speed);
-    puffers.forEach(p => p.x -= p.speed);
-    reefs.forEach(r => r.x -= r.speed);
+    backFish.forEach(f => {
+      f.x -= f.speed;
+      applyMotionFlee(f, 3);  // Background fish flee gently
+    });
+    collectibles.forEach(c => {
+      c.x -= c.speed;
+      applyMotionFlee(c, 6);  // Fish flee from motion
+    });
+    puffers.forEach(p => {
+      p.x -= p.speed;
+      applyMotionFlee(p, 4);  // Puffers flee moderately
+    });
+    reefs.forEach(r => r.x -= r.speed);  // Reefs don't flee
   }
 
   // ============ FISHTANK RENDERING ============
