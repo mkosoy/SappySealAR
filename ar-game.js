@@ -76,6 +76,9 @@ let anchorScreenX = 0;
 let anchorScreenY = 0;
 const AR_SENSITIVITY = 6;  // How much tank moves per degree of tilt
 
+// Debug: track if orientation events are firing
+let orientationEventCount = 0;
+
 // Collections
 const collectibles = [];
 const puffers = [];
@@ -203,6 +206,41 @@ function init() {
 
   // Keyboard controls for desktop testing
   window.addEventListener('keydown', handleKeyboard);
+
+  // Touch controls as fallback for mobile (if gyroscope doesn't work)
+  canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
+  canvas.addEventListener('touchmove', handleTouchMove, { passive: false });
+}
+
+// Touch fallback variables
+let touchStartX = 0, touchStartY = 0;
+let lastTouchX = 0, lastTouchY = 0;
+
+function handleTouchStart(e) {
+  if (!gameRunning || isPaused) return;
+  const touch = e.touches[0];
+  touchStartX = touch.clientX;
+  touchStartY = touch.clientY;
+  lastTouchX = touch.clientX;
+  lastTouchY = touch.clientY;
+}
+
+function handleTouchMove(e) {
+  if (!gameRunning || isPaused || isFrozen) return;
+  e.preventDefault();
+
+  const touch = e.touches[0];
+  const deltaX = touch.clientX - lastTouchX;
+  const deltaY = touch.clientY - lastTouchY;
+  lastTouchX = touch.clientX;
+  lastTouchY = touch.clientY;
+
+  // Move seal based on touch drag
+  const tankHalfW = (FISHTANK.width / 2 - 40) * tankScale;
+  const tankHalfH = (FISHTANK.height / 2 - 40) * tankScale;
+
+  targetX = Math.max(tankCenterX - tankHalfW, Math.min(tankCenterX + tankHalfW, targetX + deltaX));
+  targetY = Math.max(tankCenterY - tankHalfH, Math.min(tankCenterY + tankHalfH, targetY + deltaY));
 }
 
 // Keyboard controls for desktop testing (no gyroscope)
@@ -321,6 +359,7 @@ function handlePlacementTap() {
 
 function setupDeviceOrientation() {
   window.addEventListener('deviceorientation', (e) => {
+    orientationEventCount++;  // Debug: count events
     currentGamma = e.gamma || 0;
     currentBeta = e.beta || 0;
 
@@ -1176,6 +1215,18 @@ function gameLoop() {
     tankCenterX = canvas.width / 2;
     tankCenterY = canvas.height / 2;
   }
+
+  // DEBUG: Show orientation values to diagnose if events are firing
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.8)';
+  ctx.fillRect(5, 5, 220, 80);
+  ctx.fillStyle = '#0f0';
+  ctx.font = '12px monospace';
+  ctx.fillText(`beta: ${currentBeta.toFixed(1)}  gamma: ${currentGamma.toFixed(1)}`, 10, 22);
+  ctx.fillText(`events: ${orientationEventCount}  anchored: ${isAnchored}`, 10, 38);
+  ctx.fillText(`tank: (${tankCenterX.toFixed(0)}, ${tankCenterY.toFixed(0)})`, 10, 54);
+  ctx.fillText(`seal target: (${targetX?.toFixed(0) || 0}, ${targetY?.toFixed(0) || 0})`, 10, 70);
+  ctx.restore();
 
   if (gameRunning && !isPaused) {
     updateSeal();
