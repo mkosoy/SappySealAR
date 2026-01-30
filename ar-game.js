@@ -376,6 +376,17 @@ function setupDeviceOrientation() {
       // Tilt forward → tank moves up (you're looking below where tank is)
       tankCenterX = anchorScreenX - (relativeGamma * AR_SENSITIVITY);
       tankCenterY = anchorScreenY - (relativeBeta * AR_SENSITIVITY);
+
+      // Perspective scaling: Tank gets slightly larger when tilted toward you
+      // Tilt toward (negative beta relative) = closer = larger
+      const perspectiveScale = 1.0 - (relativeBeta * 0.003);
+      tankScale = Math.max(0.7, Math.min(1.3, perspectiveScale));
+
+      // Boundary limits: Keep tank partially visible
+      const halfW = FISHTANK.width / 2 * tankScale;
+      const halfH = FISHTANK.height / 2 * tankScale;
+      tankCenterX = Math.max(-halfW * 0.5, Math.min(canvas.width + halfW * 0.5, tankCenterX));
+      tankCenterY = Math.max(-halfH * 0.3, Math.min(canvas.height + halfH * 0.3, tankCenterY));
     }
 
     // Update parallax (legacy)
@@ -1196,11 +1207,26 @@ function cleanupOffscreen() {
 function gameLoop() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  // Tank always at screen center (simplified - no AR positioning)
-  tankCenterX = canvas.width / 2;
-  tankCenterY = canvas.height / 2;
+  // AR positioning: Only set to screen center if NOT anchored
+  // When anchored, tankCenter is controlled by deviceorientation handler
+  if (!isAnchored) {
+    tankCenterX = canvas.width / 2;
+    tankCenterY = canvas.height / 2;
+  }
 
-  // Debug display removed - game simplified to touch controls only
+  // DEBUG: Show gyroscope status (remove after fixing)
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.8)';
+  ctx.fillRect(5, 5, 250, 100);
+  ctx.fillStyle = '#0f0';
+  ctx.font = '11px monospace';
+  ctx.fillText(`Gyro events: ${orientationEventCount}`, 10, 20);
+  ctx.fillText(`Beta: ${currentBeta.toFixed(1)}  Gamma: ${currentGamma.toFixed(1)}`, 10, 35);
+  ctx.fillText(`Anchored: ${isAnchored}`, 10, 50);
+  ctx.fillText(`Tank: (${tankCenterX.toFixed(0)}, ${tankCenterY.toFixed(0)})`, 10, 65);
+  ctx.fillText(`Anchor: (${anchorScreenX.toFixed(0)}, ${anchorScreenY.toFixed(0)})`, 10, 80);
+  ctx.fillText(`Seal: (${sealX?.toFixed(0) || 0}, ${sealY?.toFixed(0) || 0})`, 10, 95);
+  ctx.restore();
 
   if (gameRunning && !isPaused) {
     updateSeal();
