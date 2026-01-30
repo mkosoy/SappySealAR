@@ -1,4 +1,4 @@
-/* Sappy Seals AR - Styles */
+/* Sappy Seals AR - Enhanced Styles */
 
 * {
   margin: 0;
@@ -18,7 +18,7 @@ html, body {
   user-select: none;
 }
 
-/* Camera feed - fullscreen background */
+/* Camera feed */
 #camera {
   position: fixed;
   top: 0;
@@ -29,7 +29,7 @@ html, body {
   z-index: 0;
 }
 
-/* Game canvas - overlay on camera */
+/* Game canvas */
 #gameCanvas {
   position: fixed;
   top: 0;
@@ -94,11 +94,127 @@ html, body {
   color: #FF6B6B;
   margin: 0 3px;
   text-shadow: 0 0 15px rgba(255, 107, 107, 0.6);
-  transition: opacity 0.3s ease, transform 0.2s ease;
+  transition: opacity 0.3s ease;
 }
 
-.heart[style*="opacity: 0.2"] {
-  filter: grayscale(1);
+/* Pause Button */
+#pause-btn {
+  position: fixed;
+  bottom: 30px;
+  right: 20px;
+  padding-right: max(20px, env(safe-area-inset-right));
+  width: 50px;
+  height: 50px;
+  font-size: 24px;
+  background: rgba(0, 0, 0, 0.5);
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  z-index: 100;
+  cursor: pointer;
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+  -webkit-tap-highlight-color: transparent;
+}
+
+#pause-btn:active {
+  transform: scale(0.9);
+  background: rgba(0, 0, 0, 0.7);
+}
+
+/* Placement Overlay */
+#placement-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: none;
+  justify-content: center;
+  align-items: center;
+  z-index: 150;
+  animation: fadeIn 0.3s ease;
+}
+
+#placement-content {
+  text-align: center;
+  color: white;
+}
+
+.placement-icon {
+  font-size: 60px;
+  margin-bottom: 20px;
+  animation: bounce 1s ease infinite;
+}
+
+@keyframes bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-15px); }
+}
+
+#placement-content p {
+  font-size: 22px;
+  margin-bottom: 10px;
+}
+
+.placement-hint {
+  font-size: 16px !important;
+  opacity: 0.7;
+}
+
+/* Pause Overlay */
+#pause-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.85);
+  display: none;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  z-index: 200;
+}
+
+#pause-content {
+  text-align: center;
+}
+
+#pause-content h2 {
+  font-size: 36px;
+  color: #4ECDC4;
+  margin-bottom: 40px;
+}
+
+#pause-overlay button {
+  display: block;
+  width: 220px;
+  margin: 15px auto;
+  padding: 18px 30px;
+  font-size: 18px;
+  font-family: inherit;
+  font-weight: bold;
+  border: none;
+  border-radius: 30px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#resume-btn {
+  background: linear-gradient(135deg, #4ECDC4, #2EAF9F);
+  color: white;
+  box-shadow: 0 8px 25px rgba(78, 205, 196, 0.4);
+}
+
+#reanchor-btn {
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+}
+
+#resume-btn:active, #reanchor-btn:active {
+  transform: scale(0.95);
 }
 
 /* Start Screen */
@@ -125,15 +241,31 @@ html, body {
   font-size: 38px;
   color: #4ECDC4;
   text-shadow: 0 0 30px rgba(78, 205, 196, 0.6);
-  margin-bottom: 30px;
-  letter-spacing: 1px;
+  margin-bottom: 25px;
 }
 
 #start-content p {
   font-size: 17px;
   color: #FFFFFF;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
   opacity: 0.9;
+}
+
+.obstacle-legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 15px;
+  margin: 25px 0;
+  padding: 15px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 15px;
+}
+
+.obstacle-legend span {
+  font-size: 14px;
+  color: #fff;
+  opacity: 0.8;
 }
 
 #start-btn, #restart-btn {
@@ -146,15 +278,13 @@ html, body {
   color: #FFFFFF;
   border-radius: 35px;
   cursor: pointer;
-  margin-top: 35px;
+  margin-top: 20px;
   box-shadow: 0 10px 30px rgba(78, 205, 196, 0.5);
-  transition: transform 0.2s, box-shadow 0.2s;
   -webkit-tap-highlight-color: transparent;
 }
 
 #start-btn:active, #restart-btn:active {
   transform: scale(0.95);
-  box-shadow: 0 5px 20px rgba(78, 205, 196, 0.4);
 }
 
 /* Game Over Screen */
@@ -196,7 +326,35 @@ html, body {
   text-shadow: 0 0 20px rgba(255, 215, 0, 0.5);
 }
 
-/* Safe area for notched phones */
+/* Freeze Effect Overlay */
+#freeze-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(100, 200, 255, 0);
+  pointer-events: none;
+  z-index: 50;
+  transition: background 0.2s ease;
+}
+
+#freeze-overlay.active {
+  background: rgba(100, 200, 255, 0.3);
+  animation: freezePulse 0.3s ease infinite;
+}
+
+@keyframes freezePulse {
+  0%, 100% { background: rgba(100, 200, 255, 0.3); }
+  50% { background: rgba(150, 220, 255, 0.5); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Safe area */
 @supports (padding: max(0px)) {
   #ui-overlay {
     padding-left: max(20px, env(safe-area-inset-left));

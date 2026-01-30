@@ -26,12 +26,39 @@
     </div>
   </div>
 
+  <!-- Pause Button (during gameplay) -->
+  <button id="pause-btn">⚙️</button>
+
+  <!-- Placement Overlay (tap to anchor) -->
+  <div id="placement-overlay">
+    <div id="placement-content">
+      <div class="placement-icon">📍</div>
+      <p>Point at a surface</p>
+      <p class="placement-hint">Tap to place your game board</p>
+    </div>
+  </div>
+
+  <!-- Pause Menu -->
+  <div id="pause-overlay">
+    <div id="pause-content">
+      <h2>Paused</h2>
+      <button id="resume-btn">▶️ Resume</button>
+      <button id="reanchor-btn">📍 Find New Surface</button>
+    </div>
+  </div>
+
   <!-- Start Screen -->
   <div id="start-screen">
     <div id="start-content">
       <h1>Sappy Seals AR</h1>
       <p>Tilt your phone to move the seal</p>
-      <p>Collect fish, avoid puffers!</p>
+      <p>Collect fish, avoid dangers!</p>
+      <div class="obstacle-legend">
+        <span>🐡 Puffer</span>
+        <span>🦈 Shark</span>
+        <span>🪸 Reef</span>
+        <span>🎐 Jellyfish</span>
+      </div>
       <button id="start-btn">Start Game</button>
     </div>
   </div>
@@ -44,6 +71,9 @@
       <button id="restart-btn">Play Again</button>
     </div>
   </div>
+
+  <!-- Freeze Effect Overlay -->
+  <div id="freeze-overlay"></div>
 
   <script src="ar-game.js"></script>
 </body>
