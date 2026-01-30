@@ -78,6 +78,7 @@ const AR_SENSITIVITY = 6;  // How much tank moves per degree of tilt
 
 // Debug: track if orientation events are firing
 let orientationEventCount = 0;
+let orientationSetupAttempted = false;
 
 // Collections
 const collectibles = [];
@@ -298,13 +299,26 @@ async function requestPermissionsAndStart() {
       typeof DeviceOrientationEvent.requestPermission === 'function') {
     try {
       const response = await DeviceOrientationEvent.requestPermission();
+      console.log('Orientation permission response:', response);
       if (response === 'granted') {
+        setupDeviceOrientation();
+      } else {
+        // Try anyway - some browsers still fire events
+        console.log('Permission not granted, trying anyway...');
         setupDeviceOrientation();
       }
     } catch (err) {
-      console.warn('Orientation permission denied:', err);
+      console.warn('Orientation permission error:', err);
+      // Try anyway as fallback
+      setupDeviceOrientation();
     }
   } else {
+    // Non-iOS or older browser
+    setupDeviceOrientation();
+  }
+
+  // Always try to add listener as backup (some devices fire without permission)
+  if (!orientationSetupAttempted) {
     setupDeviceOrientation();
   }
 
@@ -358,6 +372,10 @@ function handlePlacementTap() {
 }
 
 function setupDeviceOrientation() {
+  if (orientationSetupAttempted) return;  // Don't add duplicate listeners
+  orientationSetupAttempted = true;
+  console.log('Setting up device orientation listener...');
+
   window.addEventListener('deviceorientation', (e) => {
     orientationEventCount++;  // Debug: count events
     currentGamma = e.gamma || 0;
@@ -1216,16 +1234,17 @@ function gameLoop() {
 
   // DEBUG: Show gyroscope status (remove after fixing)
   ctx.save();
-  ctx.fillStyle = 'rgba(0,0,0,0.8)';
-  ctx.fillRect(5, 5, 250, 100);
+  ctx.fillStyle = 'rgba(0,0,0,0.85)';
+  ctx.fillRect(5, 5, 260, 115);
+  ctx.fillStyle = orientationEventCount > 0 ? '#0f0' : '#f00';
+  ctx.font = '12px monospace';
+  ctx.fillText(`Gyro: ${orientationEventCount} events ${orientationSetupAttempted ? '(setup OK)' : '(NOT setup)'}`, 10, 22);
   ctx.fillStyle = '#0f0';
-  ctx.font = '11px monospace';
-  ctx.fillText(`Gyro events: ${orientationEventCount}`, 10, 20);
-  ctx.fillText(`Beta: ${currentBeta.toFixed(1)}  Gamma: ${currentGamma.toFixed(1)}`, 10, 35);
-  ctx.fillText(`Anchored: ${isAnchored}`, 10, 50);
-  ctx.fillText(`Tank: (${tankCenterX.toFixed(0)}, ${tankCenterY.toFixed(0)})`, 10, 65);
-  ctx.fillText(`Anchor: (${anchorScreenX.toFixed(0)}, ${anchorScreenY.toFixed(0)})`, 10, 80);
-  ctx.fillText(`Seal: (${sealX?.toFixed(0) || 0}, ${sealY?.toFixed(0) || 0})`, 10, 95);
+  ctx.fillText(`Beta: ${currentBeta.toFixed(1)}  Gamma: ${currentGamma.toFixed(1)}`, 10, 38);
+  ctx.fillText(`Anchored: ${isAnchored}  Scale: ${tankScale.toFixed(2)}`, 10, 54);
+  ctx.fillText(`Tank: (${tankCenterX.toFixed(0)}, ${tankCenterY.toFixed(0)})`, 10, 70);
+  ctx.fillText(`Anchor: (${anchorScreenX.toFixed(0)}, ${anchorScreenY.toFixed(0)})`, 10, 86);
+  ctx.fillText(`Seal: (${sealX?.toFixed(0) || 0}, ${sealY?.toFixed(0) || 0})`, 10, 102);
   ctx.restore();
 
   if (gameRunning && !isPaused) {
