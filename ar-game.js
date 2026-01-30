@@ -1,9 +1,34 @@
-// Sappy Seals AR - Enhanced 2D Parallax Game
-// ============================================
+// Sappy Seals AR - Fishtank Mode
+// ===============================
 
 // Canvas and context
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
+
+// ============ FISHTANK CONFIGURATION ============
+const FISHTANK = {
+  width: 340,           // Logical width in game units
+  height: 280,          // Logical height
+  depth: 200,           // Z-depth for 3D effect
+  borderWidth: 6,
+  borderColor: 'rgba(100, 200, 255, 0.5)',
+  borderGlow: 'rgba(100, 200, 255, 0.3)',
+  backgroundColor: 'rgba(0, 40, 80, 0.12)'
+};
+
+// Tank state
+let tankCenterX, tankCenterY;
+let tankScale = 1.0;
+let tankRotationX = 0, tankRotationY = 0;
+
+// Seal Z position (fixed depth)
+const SEAL_Z = FISHTANK.depth / 2;
+const Z_COLLISION_TOLERANCE = 50;  // How close in Z for collision
+
+// Device motion for distance
+let deviceDistance = 1.0;
+let lastAccelZ = 0;
+let motionPermissionGranted = false;
 
 // Game state
 let score = 0;
@@ -49,12 +74,46 @@ let isChomping = false;
 let chompScale = 1.0;
 let chompTimer = 0;
 
-// Depth layers
+// Depth layers (legacy - kept for compatibility)
 const LAYERS = {
   back: { parallax: 0.3, scale: 0.5 },
   mid: { parallax: 0.6, scale: 0.85 },
   front: { parallax: 1.0, scale: 1.0 }
 };
+
+// ============ 3D PROJECTION ============
+
+function projectToScreen(x, y, z) {
+  const perspective = 500;  // Focal length
+  const scale = perspective / (perspective + z);
+
+  return {
+    screenX: tankCenterX + (x - tankCenterX) * scale * tankScale,
+    screenY: tankCenterY + (y - tankCenterY) * scale * tankScale,
+    scale: scale * tankScale
+  };
+}
+
+function projectWithRotation(x, y, z) {
+  // Rotate point around tank center
+  const cx = x - tankCenterX;
+  const cy = y - tankCenterY;
+  const cz = z - FISHTANK.depth / 2;
+
+  // Y-axis rotation (left/right tilt)
+  const rx = cx * Math.cos(tankRotationY) - cz * Math.sin(tankRotationY);
+  const rz1 = cx * Math.sin(tankRotationY) + cz * Math.cos(tankRotationY);
+
+  // X-axis rotation (forward/back tilt)
+  const ry = cy * Math.cos(tankRotationX) - rz1 * Math.sin(tankRotationX);
+  const rz2 = cy * Math.sin(tankRotationX) + rz1 * Math.cos(tankRotationX);
+
+  return projectToScreen(rx + tankCenterX, ry + tankCenterY, rz2 + FISHTANK.depth / 2);
+}
+
+function distance3D(x1, y1, z1, x2, y2, z2) {
+  return Math.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2 + (z1 - z2) ** 2);
+}
 
 // Images
 const sealImg = new Image();
@@ -95,8 +154,11 @@ function init() {
   document.getElementById('reanchor-btn').addEventListener('click', findNewSurface);
   pauseBtn.addEventListener('click', showPauseMenu);
 
-  sealX = canvas.width / 2;
-  sealY = canvas.height / 2;
+  // Initialize tank and seal position
+  tankCenterX = canvas.width / 2;
+  tankCenterY = canvas.height / 2;
+  sealX = tankCenterX;
+  sealY = tankCenterY;
   targetX = sealX;
   targetY = sealY;
 
@@ -134,6 +196,23 @@ async function requestPermissionsAndStart() {
     }
   } else {
     setupDeviceOrientation();
+  }
+
+  // Request device motion (iOS 13+) - for distance scaling
+  if (typeof DeviceMotionEvent !== 'undefined' &&
+      typeof DeviceMotionEvent.requestPermission === 'function') {
+    try {
+      const response = await DeviceMotionEvent.requestPermission();
+      if (response === 'granted') {
+        motionPermissionGranted = true;
+        setupDeviceMotion();
+      }
+    } catch (err) {
+      console.warn('Motion permission denied:', err);
+    }
+  } else {
+    motionPermissionGranted = true;
+    setupDeviceMotion();
   }
 
   // Hide start screen, show placement overlay
@@ -176,19 +255,49 @@ function setupDeviceOrientation() {
       relativeBeta = currentBeta - anchorBeta;
     }
 
-    // Update parallax
+    // Update parallax (legacy)
     parallaxX = (relativeGamma * PARALLAX_STRENGTH) / 45;
     parallaxY = (relativeBeta * PARALLAX_STRENGTH) / 45;
 
+    // Update tank rotation for 3D effect (limited range)
+    tankRotationY = Math.max(-25, Math.min(25, relativeGamma)) * Math.PI / 180;
+    tankRotationX = Math.max(-15, Math.min(15, relativeBeta)) * Math.PI / 180;
+
     if (!gameRunning || isPaused || isFrozen) return;
 
-    // Update seal target position
-    targetX = canvas.width / 2 + (relativeGamma * TILT_SENSITIVITY);
-    targetY = canvas.height / 2 + (relativeBeta * TILT_SENSITIVITY);
+    // Update seal target position within tank bounds
+    const tankHalfW = (FISHTANK.width / 2 - 40) * tankScale;
+    const tankHalfH = (FISHTANK.height / 2 - 40) * tankScale;
 
-    // Clamp to screen bounds
-    targetX = Math.max(60, Math.min(canvas.width - 60, targetX));
-    targetY = Math.max(100, Math.min(canvas.height - 100, targetY));
+    targetX = tankCenterX + (relativeGamma * TILT_SENSITIVITY);
+    targetY = tankCenterY + (relativeBeta * TILT_SENSITIVITY);
+
+    // Clamp to tank bounds
+    targetX = Math.max(tankCenterX - tankHalfW, Math.min(tankCenterX + tankHalfW, targetX));
+    targetY = Math.max(tankCenterY - tankHalfH, Math.min(tankCenterY + tankHalfH, targetY));
+  });
+}
+
+function setupDeviceMotion() {
+  window.addEventListener('devicemotion', (e) => {
+    if (!motionPermissionGranted) return;
+
+    const accel = e.accelerationIncludingGravity;
+    if (!accel) return;
+
+    const accelZ = accel.z || 0;
+
+    // Smooth the acceleration reading
+    const smoothedAccelZ = accelZ * 0.3 + lastAccelZ * 0.7;
+    const deltaZ = smoothedAccelZ - lastAccelZ;
+    lastAccelZ = smoothedAccelZ;
+
+    // Adjust device distance based on forward/backward motion
+    // Moving phone forward (toward surface) = smaller Z accel = closer
+    if (Math.abs(deltaZ) > 0.1) {
+      deviceDistance = Math.max(0.7, Math.min(1.4, deviceDistance - deltaZ * 0.008));
+      tankScale = 1.0 / deviceDistance;
+    }
   });
 }
 
@@ -200,9 +309,15 @@ function startGame() {
   gameRunning = true;
   isPaused = false;
 
-  // Reset seal
-  sealX = canvas.width / 2;
-  sealY = canvas.height / 2;
+  // Reset tank state
+  tankCenterX = canvas.width / 2;
+  tankCenterY = canvas.height / 2;
+  tankScale = 1.0;
+  deviceDistance = 1.0;
+
+  // Reset seal to tank center
+  sealX = tankCenterX;
+  sealY = tankCenterY;
   targetX = sealX;
   targetY = sealY;
 
@@ -226,10 +341,10 @@ function startGame() {
   gameOverScreen.style.display = 'none';
   pauseBtn.style.display = 'block';
 
-  // Spawn initial elements
-  for (let i = 0; i < 4; i++) spawnBackFish();
+  // Spawn initial background fish
+  for (let i = 0; i < 3; i++) spawnBackFish();
 
-  // Start spawning
+  // Start spawning collectibles
   spawnCollectible();
 }
 
@@ -266,9 +381,12 @@ function findNewSurface() {
 // ============ SPAWNING ============
 
 function spawnBackFish() {
+  const tankRight = tankCenterX + FISHTANK.width / 2;
+  const tankTop = tankCenterY - FISHTANK.height / 2;
   backFish.push({
-    x: canvas.width + Math.random() * 200,
-    y: Math.random() * canvas.height,
+    x: tankRight + 50,
+    y: tankTop + 20 + Math.random() * (FISHTANK.height - 40),
+    z: FISHTANK.depth - 20 + Math.random() * 30,  // Back of tank
     speed: 0.3 + Math.random() * 0.4
   });
 }
@@ -276,11 +394,15 @@ function spawnBackFish() {
 function spawnCollectible() {
   if (!gameRunning) return;
 
+  const tankRight = tankCenterX + FISHTANK.width / 2;
+  const tankTop = tankCenterY - FISHTANK.height / 2;
   collectibles.push({
-    x: canvas.width + 50,
-    y: 100 + Math.random() * (canvas.height - 200),
+    x: tankRight + 50,
+    y: tankTop + 30 + Math.random() * (FISHTANK.height - 60),
+    z: 30 + Math.random() * (FISHTANK.depth - 60),  // Various depths
     collected: false,
-    speed: 2 + Math.random() * 0.5
+    speed: 2 + Math.random() * 0.5,
+    zSpeed: (Math.random() - 0.5) * 0.3  // Slight Z drift
   });
 
   // Spawn obstacles based on score
@@ -305,21 +427,29 @@ function spawnCollectible() {
 
 function spawnPuffer() {
   if (!gameRunning) return;
+  const tankRight = tankCenterX + FISHTANK.width / 2;
+  const tankTop = tankCenterY - FISHTANK.height / 2;
   puffers.push({
-    x: canvas.width + 50,
-    y: 100 + Math.random() * (canvas.height - 200),
+    x: tankRight + 50,
+    y: tankTop + 40 + Math.random() * (FISHTANK.height - 80),
+    z: 20 + Math.random() * (FISHTANK.depth - 40),  // Various depths
     hit: false,
-    speed: 2.5 + Math.random()
+    speed: 2.5 + Math.random(),
+    zSpeed: (Math.random() - 0.5) * 0.2
   });
 }
 
 function spawnShark() {
   if (!gameRunning) return;
+  const tankRight = tankCenterX + FISHTANK.width / 2;
+  const tankTop = tankCenterY - FISHTANK.height / 2;
   sharks.push({
-    x: canvas.width + 100,
-    y: canvas.height / 2,
-    baseY: 100 + Math.random() * (canvas.height - 200),
-    speed: 4 + Math.random() * 2,
+    x: tankRight + 80,
+    y: tankCenterY,
+    baseY: tankTop + 50 + Math.random() * (FISHTANK.height - 100),
+    z: FISHTANK.depth - 30,  // Start at back, swim forward
+    speed: 3 + Math.random() * 1.5,
+    zSpeed: -0.8,  // Swim toward front
     waveOffset: Math.random() * Math.PI * 2,
     hit: false
   });
@@ -327,9 +457,12 @@ function spawnShark() {
 
 function spawnReef() {
   if (!gameRunning) return;
+  const tankRight = tankCenterX + FISHTANK.width / 2;
+  const tankTop = tankCenterY - FISHTANK.height / 2;
   reefs.push({
-    x: canvas.width + 50,
-    y: 120 + Math.random() * (canvas.height - 240),
+    x: tankRight + 50,
+    y: tankTop + 50 + Math.random() * (FISHTANK.height - 100),
+    z: FISHTANK.depth - 30,  // Reefs at back of tank (on "floor")
     speed: 1.5,
     triggered: false
   });
@@ -337,10 +470,14 @@ function spawnReef() {
 
 function spawnJellyfish() {
   if (!gameRunning) return;
+  const tankRight = tankCenterX + FISHTANK.width / 2;
+  const tankTop = tankCenterY - FISHTANK.height / 2;
   jellyfish.push({
-    x: canvas.width + 50,
-    y: Math.random() * (canvas.height - 100),
+    x: tankRight + 50,
+    y: tankTop + 30 + Math.random() * (FISHTANK.height - 80),
+    z: 40 + Math.random() * (FISHTANK.depth - 80),  // Various depths
     speed: 1.2,
+    zSpeed: (Math.random() - 0.5) * 0.3,
     wobble: Math.random() * Math.PI * 2,
     hit: false
   });
@@ -415,8 +552,10 @@ function spawnScorePopup(x, y, points) {
 function updateSharks() {
   sharks.forEach(s => {
     s.x -= s.speed;
-    s.y = s.baseY + Math.sin(Date.now() / 250 + s.waveOffset) * 60;
+    s.y = s.baseY + Math.sin(Date.now() / 250 + s.waveOffset) * 40;
     s.baseY += (sealY - s.baseY) * 0.008;
+    // Move toward front of tank
+    if (s.z > 30) s.z += s.zSpeed;
   });
 }
 
@@ -424,15 +563,158 @@ function updateJellyfish() {
   jellyfish.forEach(j => {
     j.x -= j.speed;
     j.y += Math.sin(Date.now() / 400 + j.wobble) * 0.4;
+    // Drift in Z
+    j.z += j.zSpeed;
+    j.z = Math.max(30, Math.min(FISHTANK.depth - 30, j.z));
+  });
+}
+
+function updateEntitiesZ() {
+  // Update Z position for collectibles
+  collectibles.forEach(c => {
+    if (c.zSpeed) {
+      c.z += c.zSpeed;
+      c.z = Math.max(20, Math.min(FISHTANK.depth - 20, c.z));
+    }
+  });
+
+  // Update Z position for puffers
+  puffers.forEach(p => {
+    if (p.zSpeed) {
+      p.z += p.zSpeed;
+      p.z = Math.max(20, Math.min(FISHTANK.depth - 20, p.z));
+    }
   });
 }
 
 // ============ DRAWING ============
 
+// ============ FISHTANK DRAWING ============
+
+function drawFishtankBackground() {
+  ctx.save();
+
+  const halfW = FISHTANK.width / 2 * tankScale;
+  const halfH = FISHTANK.height / 2 * tankScale;
+  const left = tankCenterX - halfW;
+  const top = tankCenterY - halfH;
+  const width = FISHTANK.width * tankScale;
+  const height = FISHTANK.height * tankScale;
+
+  // Semi-transparent blue background
+  ctx.fillStyle = FISHTANK.backgroundColor;
+  ctx.beginPath();
+  ctx.roundRect(left, top, width, height, 12 * tankScale);
+  ctx.fill();
+
+  // Animated caustics pattern
+  const time = Date.now() / 1000;
+  ctx.globalAlpha = 0.08;
+  ctx.fillStyle = '#ffffff';
+  for (let i = 0; i < 6; i++) {
+    const cx = tankCenterX + Math.sin(time * 0.8 + i * 1.2) * halfW * 0.6;
+    const cy = tankCenterY + Math.cos(time * 0.6 + i * 0.9) * halfH * 0.5;
+    const rx = 25 * tankScale + Math.sin(time + i) * 10 * tankScale;
+    const ry = 12 * tankScale + Math.cos(time + i) * 5 * tankScale;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, rx, ry, time * 0.3 + i, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.restore();
+}
+
+function drawFishtankBorder() {
+  ctx.save();
+
+  const halfW = FISHTANK.width / 2 * tankScale;
+  const halfH = FISHTANK.height / 2 * tankScale;
+  const left = tankCenterX - halfW;
+  const top = tankCenterY - halfH;
+  const width = FISHTANK.width * tankScale;
+  const height = FISHTANK.height * tankScale;
+
+  // Glow effect
+  ctx.shadowColor = FISHTANK.borderGlow;
+  ctx.shadowBlur = 15 * tankScale;
+  ctx.strokeStyle = FISHTANK.borderColor;
+  ctx.lineWidth = FISHTANK.borderWidth * tankScale;
+  ctx.beginPath();
+  ctx.roundRect(left, top, width, height, 12 * tankScale);
+  ctx.stroke();
+
+  // Inner highlight (top edge)
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+  ctx.lineWidth = 2 * tankScale;
+  ctx.beginPath();
+  ctx.moveTo(left + 15 * tankScale, top + 3 * tankScale);
+  ctx.lineTo(left + width - 15 * tankScale, top + 3 * tankScale);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
 function drawWithParallax(img, x, y, width, height, layer) {
   const offsetX = parallaxX * layer.parallax;
   const offsetY = parallaxY * layer.parallax;
   ctx.drawImage(img, x + offsetX, y + offsetY, width * layer.scale, height * layer.scale);
+}
+
+// Draw entity with 3D projection
+function drawEntityWithDepth(type, entity) {
+  const proj = projectWithRotation(entity.x, entity.y, entity.z);
+
+  // Clamp drawing to tank bounds with some margin
+  const tankLeft = tankCenterX - FISHTANK.width / 2 * tankScale - 30;
+  const tankRight = tankCenterX + FISHTANK.width / 2 * tankScale + 30;
+  if (proj.screenX < tankLeft || proj.screenX > tankRight) return;
+
+  // Depth-based alpha (farther = more transparent)
+  const depthAlpha = 0.5 + 0.5 * proj.scale;
+
+  ctx.save();
+  ctx.globalAlpha = Math.min(1.0, depthAlpha);
+
+  switch (type) {
+    case 'backfish':
+      ctx.globalAlpha = 0.2 * proj.scale;
+      ctx.filter = 'grayscale(70%) brightness(0.7)';
+      ctx.drawImage(fishImg, proj.screenX - 12 * proj.scale, proj.screenY - 9 * proj.scale, 24 * proj.scale, 18 * proj.scale);
+      break;
+
+    case 'fish':
+      ctx.drawImage(fishImg, proj.screenX - 27 * proj.scale, proj.screenY - 20 * proj.scale, 54 * proj.scale, 40 * proj.scale);
+      break;
+
+    case 'puffer':
+      ctx.drawImage(pufferImg, proj.screenX - 35 * proj.scale, proj.screenY - 35 * proj.scale, 70 * proj.scale, 70 * proj.scale);
+      break;
+
+    case 'shark':
+      if (sharkImg.complete && sharkImg.naturalWidth > 0) {
+        ctx.drawImage(sharkImg, proj.screenX - 45 * proj.scale, proj.screenY - 30 * proj.scale, 90 * proj.scale, 60 * proj.scale);
+      }
+      break;
+
+    case 'jelly':
+      if (jellyImg.complete && jellyImg.naturalWidth > 0) {
+        ctx.drawImage(jellyImg, proj.screenX - 35 * proj.scale, proj.screenY - 40 * proj.scale, 70 * proj.scale, 80 * proj.scale);
+      }
+      break;
+
+    case 'reef':
+      if (reefImg.complete && reefImg.naturalWidth > 0) {
+        ctx.drawImage(reefImg, proj.screenX - 35 * proj.scale, proj.screenY - 30 * proj.scale, 70 * proj.scale, 60 * proj.scale);
+      }
+      break;
+
+    case 'seal':
+      // Seal is drawn separately with rotation/chomp
+      break;
+  }
+
+  ctx.restore();
 }
 
 function drawBackFish() {
@@ -589,46 +871,59 @@ function drawScorePopups() {
 
 // ============ COLLISIONS ============
 
+// Check if entity is within Z collision range of seal
+function inZRange(entityZ) {
+  return Math.abs(entityZ - SEAL_Z) < Z_COLLISION_TOLERANCE;
+}
+
 function checkCollisions() {
-  // Fish collection
+  // Fish collection - requires Z proximity
   collectibles.forEach(c => {
     if (c.collected) return;
-    const dist = distance(sealX, sealY, c.x + 27, c.y + 20);
-    if (dist < 60) {
+    if (!inZRange(c.z)) return;  // Must be at similar depth
+
+    const dist = distance(sealX, sealY, c.x, c.y);
+    if (dist < 55) {
       c.collected = true;
       score += 10;
       triggerChomp();
-      spawnScorePopup(c.x + 27, c.y, 10);
+      spawnScorePopup(c.x, c.y, 10);
       updateUI();
     }
   });
 
-  // Puffer collision
+  // Puffer collision - requires Z proximity
   puffers.forEach(p => {
     if (p.hit) return;
-    const dist = distance(sealX, sealY, p.x + 35, p.y + 35);
-    if (dist < 55) {
+    if (!inZRange(p.z)) return;
+
+    const dist = distance(sealX, sealY, p.x, p.y);
+    if (dist < 50) {
       p.hit = true;
       takeDamage();
     }
   });
 
-  // Shark collision
+  // Shark collision - requires Z proximity
   sharks.forEach(s => {
     if (s.hit) return;
-    const dist = distance(sealX, sealY, s.x + 40, s.y + 25);
-    if (dist < 50) {
+    if (!inZRange(s.z)) return;
+
+    const dist = distance(sealX, sealY, s.x, s.y);
+    if (dist < 45) {
       s.hit = true;
       takeDamage();
     }
   });
 
-  // Reef collision (sticky)
+  // Reef collision (sticky) - requires Z proximity
   if (!isStuck) {
     reefs.forEach(r => {
       if (r.triggered) return;
-      const dist = distance(sealX, sealY, r.x + 35, r.y + 30);
-      if (dist < 45) {
+      if (!inZRange(r.z)) return;
+
+      const dist = distance(sealX, sealY, r.x, r.y);
+      if (dist < 40) {
         r.triggered = true;
         isStuck = true;
         stuckTimer = 60;
@@ -637,12 +932,14 @@ function checkCollisions() {
     });
   }
 
-  // Jellyfish collision (freeze)
+  // Jellyfish collision (freeze) - requires Z proximity
   if (!isFrozen) {
     jellyfish.forEach(j => {
       if (j.hit) return;
-      const dist = distance(sealX, sealY, j.x + 30, j.y + 20);
-      if (dist < 45) {
+      if (!inZRange(j.z)) return;
+
+      const dist = distance(sealX, sealY, j.x, j.y);
+      if (dist < 40) {
         j.hit = true;
         isFrozen = true;
         freezeTimer = 90;
@@ -677,23 +974,25 @@ function updateUI() {
 // ============ CLEANUP ============
 
 function cleanupOffscreen() {
+  const tankLeft = tankCenterX - FISHTANK.width / 2 - 80;
+
   for (let i = backFish.length - 1; i >= 0; i--) {
-    if (backFish[i].x < -60) backFish.splice(i, 1);
+    if (backFish[i].x < tankLeft) backFish.splice(i, 1);
   }
   for (let i = collectibles.length - 1; i >= 0; i--) {
-    if (collectibles[i].x < -70 || collectibles[i].collected) collectibles.splice(i, 1);
+    if (collectibles[i].x < tankLeft || collectibles[i].collected) collectibles.splice(i, 1);
   }
   for (let i = puffers.length - 1; i >= 0; i--) {
-    if (puffers[i].x < -80 || puffers[i].hit) puffers.splice(i, 1);
+    if (puffers[i].x < tankLeft || puffers[i].hit) puffers.splice(i, 1);
   }
   for (let i = sharks.length - 1; i >= 0; i--) {
-    if (sharks[i].x < -100 || sharks[i].hit) sharks.splice(i, 1);
+    if (sharks[i].x < tankLeft - 50 || sharks[i].hit) sharks.splice(i, 1);
   }
   for (let i = reefs.length - 1; i >= 0; i--) {
-    if (reefs[i].x < -80) reefs.splice(i, 1);
+    if (reefs[i].x < tankLeft) reefs.splice(i, 1);
   }
   for (let i = jellyfish.length - 1; i >= 0; i--) {
-    if (jellyfish[i].x < -80 || jellyfish[i].hit) jellyfish.splice(i, 1);
+    if (jellyfish[i].x < tankLeft || jellyfish[i].hit) jellyfish.splice(i, 1);
   }
 }
 
@@ -702,6 +1001,10 @@ function cleanupOffscreen() {
 function gameLoop() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+  // Update tank center on resize
+  tankCenterX = canvas.width / 2;
+  tankCenterY = canvas.height / 2;
+
   if (gameRunning && !isPaused) {
     updateSeal();
     updateChomp();
@@ -709,9 +1012,10 @@ function gameLoop() {
     updateStatusEffects();
     updateSharks();
     updateJellyfish();
+    updateEntitiesZ();
   }
 
-  // Move entities
+  // Move entities (X movement)
   if (gameRunning && !isPaused) {
     backFish.forEach(f => f.x -= f.speed);
     collectibles.forEach(c => c.x -= c.speed);
@@ -719,33 +1023,91 @@ function gameLoop() {
     reefs.forEach(r => r.x -= r.speed);
   }
 
-  // Draw in depth order
-  drawBackFish();
+  // ============ FISHTANK RENDERING ============
 
-  reefs.forEach(r => drawReef(r));
+  // Draw fishtank background
+  drawFishtankBackground();
 
+  // Collect all entities for depth sorting
+  const allEntities = [];
+
+  // Add background fish
+  backFish.forEach(f => {
+    allEntities.push({ type: 'backfish', entity: f, z: f.z || FISHTANK.depth });
+  });
+
+  // Add reefs
+  reefs.forEach(r => {
+    allEntities.push({ type: 'reef', entity: r, z: r.z || FISHTANK.depth - 20 });
+  });
+
+  // Add collectibles
   collectibles.forEach(c => {
     if (!c.collected) {
-      drawWithParallax(fishImg, c.x, c.y, 55, 40, LAYERS.mid);
+      allEntities.push({ type: 'fish', entity: c, z: c.z });
     }
   });
 
+  // Add jellyfish
   jellyfish.forEach(j => {
-    if (!j.hit) drawJellyfish(j);
+    if (!j.hit) {
+      allEntities.push({ type: 'jelly', entity: j, z: j.z });
+    }
   });
 
-  if (sealImg.complete) drawSeal();
-
+  // Add puffers
   puffers.forEach(p => {
     if (!p.hit) {
-      drawWithParallax(pufferImg, p.x, p.y, 70, 70, LAYERS.front);
+      allEntities.push({ type: 'puffer', entity: p, z: p.z });
     }
   });
 
+  // Add sharks
   sharks.forEach(s => {
-    if (!s.hit) drawShark(s);
+    if (!s.hit) {
+      allEntities.push({ type: 'shark', entity: s, z: s.z });
+    }
   });
 
+  // Add seal at fixed depth
+  allEntities.push({
+    type: 'seal',
+    entity: { x: sealX, y: sealY, z: SEAL_Z },
+    z: SEAL_Z
+  });
+
+  // Sort by Z (furthest/largest Z first = painter's algorithm)
+  allEntities.sort((a, b) => b.z - a.z);
+
+  // Draw all entities in depth order
+  allEntities.forEach(item => {
+    if (item.type === 'seal') {
+      // Draw seal with rotation and chomp
+      if (sealImg.complete) {
+        const proj = projectWithRotation(sealX, sealY, SEAL_Z);
+        ctx.save();
+        ctx.translate(proj.screenX, proj.screenY);
+        ctx.rotate(sealRotation);
+        ctx.scale(chompScale * proj.scale, chompScale * proj.scale);
+
+        if (isFrozen) {
+          ctx.filter = 'hue-rotate(180deg) brightness(1.2)';
+        } else if (isStuck) {
+          ctx.filter = 'sepia(50%)';
+        }
+
+        ctx.drawImage(sealImg, -50, -50, 100, 100);
+        ctx.restore();
+      }
+    } else {
+      drawEntityWithDepth(item.type, item.entity);
+    }
+  });
+
+  // Draw fishtank border (on top)
+  drawFishtankBorder();
+
+  // Draw score popups (UI layer)
   drawScorePopups();
 
   if (gameRunning && !isPaused) {
