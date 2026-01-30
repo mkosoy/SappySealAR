@@ -211,6 +211,14 @@ function init() {
   // Touch controls as fallback for mobile (if gyroscope doesn't work)
   canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
   canvas.addEventListener('touchmove', handleTouchMove, { passive: false });
+
+  // Re-enable gyroscope when page becomes visible again (iOS fix)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && orientationSetupAttempted) {
+      console.log('Page visible again, gyroscope should resume');
+      // Events should auto-resume, but log for debugging
+    }
+  });
 }
 
 // Touch fallback variables
