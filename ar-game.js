@@ -7,13 +7,41 @@ const ctx = canvas.getContext('2d');
 
 // ============ FISHTANK CONFIGURATION ============
 const FISHTANK = {
-  width: 340,           // Logical width in game units
-  height: 280,          // Logical height
+  width: 600,           // Logical width in game units (2x larger)
+  height: 480,          // Logical height (2x larger)
   depth: 200,           // Z-depth for 3D effect
   borderWidth: 6,
   borderColor: 'rgba(100, 200, 255, 0.5)',
   borderGlow: 'rgba(100, 200, 255, 0.3)',
   backgroundColor: 'rgba(0, 40, 80, 0.12)'
+};
+
+// ============ DEPTH LANES CONFIGURATION ============
+const LANES = {
+  BACK: 0,
+  MIDDLE: 1,
+  FRONT: 2
+};
+
+const LANE_CONFIG = {
+  [LANES.BACK]: {
+    z: 160,           // Far from camera
+    scale: 0.6,       // Smaller
+    alpha: 0.6,       // More transparent
+    yOffset: -20      // Slightly higher on screen
+  },
+  [LANES.MIDDLE]: {
+    z: 100,           // Middle depth
+    scale: 0.85,
+    alpha: 0.85,
+    yOffset: 0
+  },
+  [LANES.FRONT]: {
+    z: 40,            // Close to camera
+    scale: 1.0,       // Full size
+    alpha: 1.0,       // Fully opaque
+    yOffset: 20       // Slightly lower on screen
+  }
 };
 
 // Tank state
@@ -56,6 +84,7 @@ const scorePopups = [];
 let sealX, sealY;
 let targetX, targetY;
 let sealRotation = 0;
+let sealLane = LANES.MIDDLE;  // Current depth lane
 const SEAL_SMOOTHING = 0.12;
 const TILT_SENSITIVITY = 8;
 
@@ -122,6 +151,7 @@ const pufferImg = new Image();
 const reefImg = new Image();
 const sharkImg = new Image();
 const jellyImg = new Image();
+const tankImg = new Image();
 
 sealImg.src = 'assets/seal.png';
 fishImg.src = 'assets/fish.png';
@@ -129,6 +159,7 @@ pufferImg.src = 'assets/puffer.png';
 reefImg.src = 'assets/reef.png';
 sharkImg.src = 'assets/shark.png';
 jellyImg.src = 'assets/jelly.png';
+tankImg.src = 'assets/tank.png';
 
 // DOM elements
 const scoreEl = document.getElementById('score');
@@ -263,6 +294,9 @@ function setupDeviceOrientation() {
     tankRotationY = Math.max(-25, Math.min(25, relativeGamma)) * Math.PI / 180;
     tankRotationX = Math.max(-15, Math.min(15, relativeBeta)) * Math.PI / 180;
 
+    // Update seal lane based on forward/back tilt (beta)
+    updateSealLane(relativeBeta);
+
     if (!gameRunning || isPaused || isFrozen) return;
 
     // Update seal target position within tank bounds
@@ -276,6 +310,21 @@ function setupDeviceOrientation() {
     targetX = Math.max(tankCenterX - tankHalfW, Math.min(tankCenterX + tankHalfW, targetX));
     targetY = Math.max(tankCenterY - tankHalfH, Math.min(tankCenterY + tankHalfH, targetY));
   });
+}
+
+// Update seal's depth lane based on phone tilt
+function updateSealLane(relativeBeta) {
+  if (!gameRunning || isPaused || isFrozen) return;
+
+  // Phone tilted away (positive beta) = back lane
+  // Phone tilted toward (negative beta) = front lane
+  if (relativeBeta > 15) {
+    sealLane = LANES.BACK;
+  } else if (relativeBeta < -15) {
+    sealLane = LANES.FRONT;
+  } else {
+    sealLane = LANES.MIDDLE;
+  }
 }
 
 function setupDeviceMotion() {
@@ -315,11 +364,12 @@ function startGame() {
   tankScale = 1.0;
   deviceDistance = 1.0;
 
-  // Reset seal to tank center
+  // Reset seal to tank center and middle lane
   sealX = tankCenterX;
   sealY = tankCenterY;
   targetX = sealX;
   targetY = sealY;
+  sealLane = LANES.MIDDLE;
 
   // Clear status effects
   isStuck = false;
@@ -394,15 +444,19 @@ function spawnBackFish() {
 function spawnCollectible() {
   if (!gameRunning) return;
 
+  // Randomly assign to a lane
+  const lane = Math.floor(Math.random() * 3);
+  const laneConfig = LANE_CONFIG[lane];
+
   const tankRight = tankCenterX + FISHTANK.width / 2;
   const tankTop = tankCenterY - FISHTANK.height / 2;
   collectibles.push({
     x: tankRight + 50,
-    y: tankTop + 30 + Math.random() * (FISHTANK.height - 60),
-    z: 30 + Math.random() * (FISHTANK.depth - 60),  // Various depths
+    y: tankTop + 30 + Math.random() * (FISHTANK.height - 60) + laneConfig.yOffset,
+    z: laneConfig.z,  // Z determined by lane
+    lane: lane,       // Store lane for collision detection
     collected: false,
-    speed: 2 + Math.random() * 0.5,
-    zSpeed: (Math.random() - 0.5) * 0.3  // Slight Z drift
+    speed: 2 + Math.random() * 0.5
   });
 
   // Spawn obstacles based on score
@@ -427,29 +481,39 @@ function spawnCollectible() {
 
 function spawnPuffer() {
   if (!gameRunning) return;
+
+  // Randomly assign to a lane
+  const lane = Math.floor(Math.random() * 3);
+  const laneConfig = LANE_CONFIG[lane];
+
   const tankRight = tankCenterX + FISHTANK.width / 2;
   const tankTop = tankCenterY - FISHTANK.height / 2;
   puffers.push({
     x: tankRight + 50,
-    y: tankTop + 40 + Math.random() * (FISHTANK.height - 80),
-    z: 20 + Math.random() * (FISHTANK.depth - 40),  // Various depths
+    y: tankTop + 40 + Math.random() * (FISHTANK.height - 80) + laneConfig.yOffset,
+    z: laneConfig.z,  // Z determined by lane
+    lane: lane,       // Store lane for collision detection
     hit: false,
-    speed: 2.5 + Math.random(),
-    zSpeed: (Math.random() - 0.5) * 0.2
+    speed: 2.5 + Math.random()
   });
 }
 
 function spawnShark() {
   if (!gameRunning) return;
+
+  // Randomly assign to a lane
+  const lane = Math.floor(Math.random() * 3);
+  const laneConfig = LANE_CONFIG[lane];
+
   const tankRight = tankCenterX + FISHTANK.width / 2;
   const tankTop = tankCenterY - FISHTANK.height / 2;
   sharks.push({
     x: tankRight + 80,
-    y: tankCenterY,
-    baseY: tankTop + 50 + Math.random() * (FISHTANK.height - 100),
-    z: FISHTANK.depth - 30,  // Start at back, swim forward
+    y: tankCenterY + laneConfig.yOffset,
+    baseY: tankTop + 50 + Math.random() * (FISHTANK.height - 100) + laneConfig.yOffset,
+    z: laneConfig.z,  // Z determined by lane
+    lane: lane,       // Store lane for collision detection
     speed: 3 + Math.random() * 1.5,
-    zSpeed: -0.8,  // Swim toward front
     waveOffset: Math.random() * Math.PI * 2,
     hit: false
   });
@@ -457,12 +521,18 @@ function spawnShark() {
 
 function spawnReef() {
   if (!gameRunning) return;
+
+  // Randomly assign to a lane
+  const lane = Math.floor(Math.random() * 3);
+  const laneConfig = LANE_CONFIG[lane];
+
   const tankRight = tankCenterX + FISHTANK.width / 2;
   const tankTop = tankCenterY - FISHTANK.height / 2;
   reefs.push({
     x: tankRight + 50,
-    y: tankTop + 50 + Math.random() * (FISHTANK.height - 100),
-    z: FISHTANK.depth - 30,  // Reefs at back of tank (on "floor")
+    y: tankTop + 50 + Math.random() * (FISHTANK.height - 100) + laneConfig.yOffset,
+    z: laneConfig.z,  // Z determined by lane
+    lane: lane,       // Store lane for collision detection
     speed: 1.5,
     triggered: false
   });
@@ -470,14 +540,19 @@ function spawnReef() {
 
 function spawnJellyfish() {
   if (!gameRunning) return;
+
+  // Randomly assign to a lane
+  const lane = Math.floor(Math.random() * 3);
+  const laneConfig = LANE_CONFIG[lane];
+
   const tankRight = tankCenterX + FISHTANK.width / 2;
   const tankTop = tankCenterY - FISHTANK.height / 2;
   jellyfish.push({
     x: tankRight + 50,
-    y: tankTop + 30 + Math.random() * (FISHTANK.height - 80),
-    z: 40 + Math.random() * (FISHTANK.depth - 80),  // Various depths
+    y: tankTop + 30 + Math.random() * (FISHTANK.height - 80) + laneConfig.yOffset,
+    z: laneConfig.z,  // Z determined by lane
+    lane: lane,       // Store lane for collision detection
     speed: 1.2,
-    zSpeed: (Math.random() - 0.5) * 0.3,
     wobble: Math.random() * Math.PI * 2,
     hit: false
   });
@@ -554,8 +629,7 @@ function updateSharks() {
     s.x -= s.speed;
     s.y = s.baseY + Math.sin(Date.now() / 250 + s.waveOffset) * 40;
     s.baseY += (sealY - s.baseY) * 0.008;
-    // Move toward front of tank
-    if (s.z > 30) s.z += s.zSpeed;
+    // Sharks stay in their assigned lane (no Z drift)
   });
 }
 
@@ -563,27 +637,7 @@ function updateJellyfish() {
   jellyfish.forEach(j => {
     j.x -= j.speed;
     j.y += Math.sin(Date.now() / 400 + j.wobble) * 0.4;
-    // Drift in Z
-    j.z += j.zSpeed;
-    j.z = Math.max(30, Math.min(FISHTANK.depth - 30, j.z));
-  });
-}
-
-function updateEntitiesZ() {
-  // Update Z position for collectibles
-  collectibles.forEach(c => {
-    if (c.zSpeed) {
-      c.z += c.zSpeed;
-      c.z = Math.max(20, Math.min(FISHTANK.depth - 20, c.z));
-    }
-  });
-
-  // Update Z position for puffers
-  puffers.forEach(p => {
-    if (p.zSpeed) {
-      p.z += p.zSpeed;
-      p.z = Math.max(20, Math.min(FISHTANK.depth - 20, p.z));
-    }
+    // Jellyfish stay in their assigned lane (no Z drift)
   });
 }
 
@@ -601,15 +655,22 @@ function drawFishtankBackground() {
   const width = FISHTANK.width * tankScale;
   const height = FISHTANK.height * tankScale;
 
-  // Semi-transparent blue background
-  ctx.fillStyle = FISHTANK.backgroundColor;
-  ctx.beginPath();
-  ctx.roundRect(left, top, width, height, 12 * tankScale);
-  ctx.fill();
+  // Draw tank.png as semi-transparent background
+  if (tankImg.complete && tankImg.naturalWidth > 0) {
+    ctx.globalAlpha = 0.85;  // Slight transparency for see-through effect
+    ctx.drawImage(tankImg, left, top, width, height);
+    ctx.globalAlpha = 1.0;
+  } else {
+    // Fallback: Semi-transparent blue background
+    ctx.fillStyle = FISHTANK.backgroundColor;
+    ctx.beginPath();
+    ctx.roundRect(left, top, width, height, 12 * tankScale);
+    ctx.fill();
+  }
 
-  // Animated caustics pattern
+  // Animated caustics pattern (on top of tank image)
   const time = Date.now() / 1000;
-  ctx.globalAlpha = 0.08;
+  ctx.globalAlpha = 0.06;
   ctx.fillStyle = '#ffffff';
   for (let i = 0; i < 6; i++) {
     const cx = tankCenterX + Math.sin(time * 0.8 + i * 1.2) * halfW * 0.6;
@@ -655,57 +716,119 @@ function drawFishtankBorder() {
   ctx.restore();
 }
 
+// Draw horizontal lane divider lines
+function drawLaneLines() {
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([10, 10]);
+
+  const halfW = FISHTANK.width / 2 * tankScale;
+  const left = tankCenterX - halfW + 20;
+  const right = tankCenterX + halfW - 20;
+
+  // Line between back and middle lanes (upper third)
+  const y1 = tankCenterY - 50 * tankScale;
+  ctx.beginPath();
+  ctx.moveTo(left, y1);
+  ctx.lineTo(right, y1);
+  ctx.stroke();
+
+  // Line between middle and front lanes (lower third)
+  const y2 = tankCenterY + 50 * tankScale;
+  ctx.beginPath();
+  ctx.moveTo(left, y2);
+  ctx.lineTo(right, y2);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+// Draw current lane indicator below tank
+function drawLaneIndicator() {
+  ctx.save();
+  ctx.font = `bold ${14 * tankScale}px sans-serif`;
+  ctx.textAlign = 'center';
+
+  const labels = ['BACK', 'MIDDLE', 'FRONT'];
+  const colors = ['rgba(150, 180, 255, 0.8)', 'rgba(200, 255, 200, 0.8)', 'rgba(255, 200, 150, 0.8)'];
+  const y = tankCenterY + FISHTANK.height / 2 * tankScale + 30;
+
+  // Background pill
+  const text = `⬤ ${labels[sealLane]}`;
+  const metrics = ctx.measureText(text);
+  const padding = 10;
+
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+  ctx.beginPath();
+  ctx.roundRect(
+    tankCenterX - metrics.width / 2 - padding,
+    y - 10,
+    metrics.width + padding * 2,
+    22,
+    11
+  );
+  ctx.fill();
+
+  // Text
+  ctx.fillStyle = colors[sealLane];
+  ctx.fillText(text, tankCenterX, y + 4);
+
+  ctx.restore();
+}
+
 function drawWithParallax(img, x, y, width, height, layer) {
   const offsetX = parallaxX * layer.parallax;
   const offsetY = parallaxY * layer.parallax;
   ctx.drawImage(img, x + offsetX, y + offsetY, width * layer.scale, height * layer.scale);
 }
 
-// Draw entity with 3D projection
+// Draw entity with lane-based scaling
 function drawEntityWithDepth(type, entity) {
-  const proj = projectWithRotation(entity.x, entity.y, entity.z);
+  // Get lane config for scaling and alpha
+  const lane = entity.lane !== undefined ? entity.lane : LANES.MIDDLE;
+  const laneConfig = LANE_CONFIG[lane];
+  const scale = laneConfig.scale * tankScale;
+  const alpha = laneConfig.alpha;
 
   // Clamp drawing to tank bounds with some margin
-  const tankLeft = tankCenterX - FISHTANK.width / 2 * tankScale - 30;
-  const tankRight = tankCenterX + FISHTANK.width / 2 * tankScale + 30;
-  if (proj.screenX < tankLeft || proj.screenX > tankRight) return;
-
-  // Depth-based alpha (farther = more transparent)
-  const depthAlpha = 0.5 + 0.5 * proj.scale;
+  const tankLeft = tankCenterX - FISHTANK.width / 2 * tankScale - 50;
+  const tankRight = tankCenterX + FISHTANK.width / 2 * tankScale + 50;
+  if (entity.x < tankLeft || entity.x > tankRight) return;
 
   ctx.save();
-  ctx.globalAlpha = Math.min(1.0, depthAlpha);
+  ctx.globalAlpha = alpha;
 
   switch (type) {
     case 'backfish':
-      ctx.globalAlpha = 0.2 * proj.scale;
+      ctx.globalAlpha = 0.2;
       ctx.filter = 'grayscale(70%) brightness(0.7)';
-      ctx.drawImage(fishImg, proj.screenX - 12 * proj.scale, proj.screenY - 9 * proj.scale, 24 * proj.scale, 18 * proj.scale);
+      ctx.drawImage(fishImg, entity.x - 12 * scale, entity.y - 9 * scale, 24 * scale, 18 * scale);
       break;
 
     case 'fish':
-      ctx.drawImage(fishImg, proj.screenX - 27 * proj.scale, proj.screenY - 20 * proj.scale, 54 * proj.scale, 40 * proj.scale);
+      ctx.drawImage(fishImg, entity.x - 27 * scale, entity.y - 20 * scale, 54 * scale, 40 * scale);
       break;
 
     case 'puffer':
-      ctx.drawImage(pufferImg, proj.screenX - 35 * proj.scale, proj.screenY - 35 * proj.scale, 70 * proj.scale, 70 * proj.scale);
+      ctx.drawImage(pufferImg, entity.x - 35 * scale, entity.y - 35 * scale, 70 * scale, 70 * scale);
       break;
 
     case 'shark':
       if (sharkImg.complete && sharkImg.naturalWidth > 0) {
-        ctx.drawImage(sharkImg, proj.screenX - 45 * proj.scale, proj.screenY - 30 * proj.scale, 90 * proj.scale, 60 * proj.scale);
+        ctx.drawImage(sharkImg, entity.x - 45 * scale, entity.y - 30 * scale, 90 * scale, 60 * scale);
       }
       break;
 
     case 'jelly':
       if (jellyImg.complete && jellyImg.naturalWidth > 0) {
-        ctx.drawImage(jellyImg, proj.screenX - 35 * proj.scale, proj.screenY - 40 * proj.scale, 70 * proj.scale, 80 * proj.scale);
+        ctx.drawImage(jellyImg, entity.x - 35 * scale, entity.y - 40 * scale, 70 * scale, 80 * scale);
       }
       break;
 
     case 'reef':
       if (reefImg.complete && reefImg.naturalWidth > 0) {
-        ctx.drawImage(reefImg, proj.screenX - 35 * proj.scale, proj.screenY - 30 * proj.scale, 70 * proj.scale, 60 * proj.scale);
+        ctx.drawImage(reefImg, entity.x - 35 * scale, entity.y - 30 * scale, 70 * scale, 60 * scale);
       }
       break;
 
@@ -871,19 +994,22 @@ function drawScorePopups() {
 
 // ============ COLLISIONS ============
 
-// Check if entity is within Z collision range of seal
-function inZRange(entityZ) {
-  return Math.abs(entityZ - SEAL_Z) < Z_COLLISION_TOLERANCE;
+// Check if entity is in same lane as seal
+function inSameLane(entityLane) {
+  return entityLane === sealLane;
 }
 
 function checkCollisions() {
-  // Fish collection - requires Z proximity
+  // Get collision radius adjusted for current seal lane scale
+  const sealScale = LANE_CONFIG[sealLane].scale;
+
+  // Fish collection - must be in same lane
   collectibles.forEach(c => {
     if (c.collected) return;
-    if (!inZRange(c.z)) return;  // Must be at similar depth
+    if (!inSameLane(c.lane)) return;  // Must be in same lane
 
     const dist = distance(sealX, sealY, c.x, c.y);
-    if (dist < 55) {
+    if (dist < 55 * sealScale) {
       c.collected = true;
       score += 10;
       triggerChomp();
@@ -892,38 +1018,38 @@ function checkCollisions() {
     }
   });
 
-  // Puffer collision - requires Z proximity
+  // Puffer collision - must be in same lane
   puffers.forEach(p => {
     if (p.hit) return;
-    if (!inZRange(p.z)) return;
+    if (!inSameLane(p.lane)) return;
 
     const dist = distance(sealX, sealY, p.x, p.y);
-    if (dist < 50) {
+    if (dist < 50 * sealScale) {
       p.hit = true;
       takeDamage();
     }
   });
 
-  // Shark collision - requires Z proximity
+  // Shark collision - must be in same lane
   sharks.forEach(s => {
     if (s.hit) return;
-    if (!inZRange(s.z)) return;
+    if (!inSameLane(s.lane)) return;
 
     const dist = distance(sealX, sealY, s.x, s.y);
-    if (dist < 45) {
+    if (dist < 45 * sealScale) {
       s.hit = true;
       takeDamage();
     }
   });
 
-  // Reef collision (sticky) - requires Z proximity
+  // Reef collision (sticky) - must be in same lane
   if (!isStuck) {
     reefs.forEach(r => {
       if (r.triggered) return;
-      if (!inZRange(r.z)) return;
+      if (!inSameLane(r.lane)) return;
 
       const dist = distance(sealX, sealY, r.x, r.y);
-      if (dist < 40) {
+      if (dist < 40 * sealScale) {
         r.triggered = true;
         isStuck = true;
         stuckTimer = 60;
@@ -932,14 +1058,14 @@ function checkCollisions() {
     });
   }
 
-  // Jellyfish collision (freeze) - requires Z proximity
+  // Jellyfish collision (freeze) - must be in same lane
   if (!isFrozen) {
     jellyfish.forEach(j => {
       if (j.hit) return;
-      if (!inZRange(j.z)) return;
+      if (!inSameLane(j.lane)) return;
 
       const dist = distance(sealX, sealY, j.x, j.y);
-      if (dist < 40) {
+      if (dist < 40 * sealScale) {
         j.hit = true;
         isFrozen = true;
         freezeTimer = 90;
@@ -1012,7 +1138,6 @@ function gameLoop() {
     updateStatusEffects();
     updateSharks();
     updateJellyfish();
-    updateEntitiesZ();
   }
 
   // Move entities (X movement)
@@ -1025,55 +1150,62 @@ function gameLoop() {
 
   // ============ FISHTANK RENDERING ============
 
-  // Draw fishtank background
+  // Draw fishtank background (tank.png)
   drawFishtankBackground();
+
+  // Draw lane divider lines
+  drawLaneLines();
 
   // Collect all entities for depth sorting
   const allEntities = [];
 
-  // Add background fish
+  // Add background fish (decorative, always at back)
   backFish.forEach(f => {
-    allEntities.push({ type: 'backfish', entity: f, z: f.z || FISHTANK.depth });
+    allEntities.push({ type: 'backfish', entity: f, z: FISHTANK.depth, lane: LANES.BACK });
   });
 
-  // Add reefs
+  // Add reefs with their lane
   reefs.forEach(r => {
-    allEntities.push({ type: 'reef', entity: r, z: r.z || FISHTANK.depth - 20 });
+    if (!r.triggered) {
+      allEntities.push({ type: 'reef', entity: r, z: r.z, lane: r.lane });
+    }
   });
 
-  // Add collectibles
+  // Add collectibles with their lane
   collectibles.forEach(c => {
     if (!c.collected) {
-      allEntities.push({ type: 'fish', entity: c, z: c.z });
+      allEntities.push({ type: 'fish', entity: c, z: c.z, lane: c.lane });
     }
   });
 
-  // Add jellyfish
+  // Add jellyfish with their lane
   jellyfish.forEach(j => {
     if (!j.hit) {
-      allEntities.push({ type: 'jelly', entity: j, z: j.z });
+      allEntities.push({ type: 'jelly', entity: j, z: j.z, lane: j.lane });
     }
   });
 
-  // Add puffers
+  // Add puffers with their lane
   puffers.forEach(p => {
     if (!p.hit) {
-      allEntities.push({ type: 'puffer', entity: p, z: p.z });
+      allEntities.push({ type: 'puffer', entity: p, z: p.z, lane: p.lane });
     }
   });
 
-  // Add sharks
+  // Add sharks with their lane
   sharks.forEach(s => {
     if (!s.hit) {
-      allEntities.push({ type: 'shark', entity: s, z: s.z });
+      allEntities.push({ type: 'shark', entity: s, z: s.z, lane: s.lane });
     }
   });
 
-  // Add seal at fixed depth
+  // Add seal at its current lane depth
+  const sealZ = LANE_CONFIG[sealLane].z;
   allEntities.push({
     type: 'seal',
-    entity: { x: sealX, y: sealY, z: SEAL_Z },
-    z: SEAL_Z
+    entity: { x: sealX, y: sealY, z: sealZ },
+    z: sealZ,
+    lane: sealLane
   });
 
   // Sort by Z (furthest/largest Z first = painter's algorithm)
@@ -1082,13 +1214,15 @@ function gameLoop() {
   // Draw all entities in depth order
   allEntities.forEach(item => {
     if (item.type === 'seal') {
-      // Draw seal with rotation and chomp
+      // Draw seal with rotation, chomp, and lane scaling
       if (sealImg.complete) {
-        const proj = projectWithRotation(sealX, sealY, SEAL_Z);
+        const laneConfig = LANE_CONFIG[sealLane];
+        const proj = projectWithRotation(sealX, sealY, sealZ);
         ctx.save();
+        ctx.globalAlpha = laneConfig.alpha;
         ctx.translate(proj.screenX, proj.screenY);
         ctx.rotate(sealRotation);
-        ctx.scale(chompScale * proj.scale, chompScale * proj.scale);
+        ctx.scale(chompScale * laneConfig.scale * tankScale, chompScale * laneConfig.scale * tankScale);
 
         if (isFrozen) {
           ctx.filter = 'hue-rotate(180deg) brightness(1.2)';
@@ -1106,6 +1240,11 @@ function gameLoop() {
 
   // Draw fishtank border (on top)
   drawFishtankBorder();
+
+  // Draw lane indicator
+  if (gameRunning) {
+    drawLaneIndicator();
+  }
 
   // Draw score popups (UI layer)
   drawScorePopups();
