@@ -61,11 +61,15 @@ const sealImg = new Image();
 const fishImg = new Image();
 const pufferImg = new Image();
 const reefImg = new Image();
+const sharkImg = new Image();
+const jellyImg = new Image();
 
 sealImg.src = 'assets/seal.png';
 fishImg.src = 'assets/fish.png';
 pufferImg.src = 'assets/puffer.png';
 reefImg.src = 'assets/reef.png';
+sharkImg.src = 'assets/shark.png';
+jellyImg.src = 'assets/jelly.png';
 
 // DOM elements
 const scoreEl = document.getElementById('score');
@@ -136,8 +140,8 @@ async function requestPermissionsAndStart() {
   startScreen.style.display = 'none';
   placementOverlay.style.display = 'flex';
 
-  // Wait for tap to anchor
-  canvas.addEventListener('click', handlePlacementTap, { once: true });
+  // Wait for tap to anchor (listen on overlay, not canvas - overlay has higher z-index)
+  placementOverlay.addEventListener('click', handlePlacementTap, { once: true });
 
   // Start render loop (shows preview while placing)
   requestAnimationFrame(gameLoop);
@@ -256,7 +260,7 @@ function findNewSurface() {
   isAnchored = false;
   pauseOverlay.style.display = 'none';
   placementOverlay.style.display = 'flex';
-  canvas.addEventListener('click', handlePlacementTap, { once: true });
+  placementOverlay.addEventListener('click', handlePlacementTap, { once: true });
 }
 
 // ============ SPAWNING ============
@@ -467,78 +471,85 @@ function drawShark(s) {
   const x = s.x + offsetX;
   const y = s.y + offsetY;
 
-  ctx.save();
-  ctx.translate(x + 40, y + 25);
+  if (sharkImg.complete && sharkImg.naturalWidth > 0) {
+    ctx.drawImage(sharkImg, x, y, 90, 60);
+  } else {
+    // Fallback: draw shark shape
+    ctx.save();
+    ctx.translate(x + 40, y + 25);
 
-  // Shark body (dark gray)
-  ctx.fillStyle = '#4a5568';
-  ctx.beginPath();
-  ctx.moveTo(-40, 0);
-  ctx.lineTo(40, -5);
-  ctx.lineTo(40, 5);
-  ctx.closePath();
-  ctx.fill();
+    ctx.fillStyle = '#4a5568';
+    ctx.beginPath();
+    ctx.moveTo(-40, 0);
+    ctx.lineTo(40, -5);
+    ctx.lineTo(40, 5);
+    ctx.closePath();
+    ctx.fill();
 
-  // Dorsal fin
-  ctx.beginPath();
-  ctx.moveTo(0, -5);
-  ctx.lineTo(15, -25);
-  ctx.lineTo(25, -5);
-  ctx.closePath();
-  ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(0, -5);
+    ctx.lineTo(15, -25);
+    ctx.lineTo(25, -5);
+    ctx.closePath();
+    ctx.fill();
 
-  // Tail fin
-  ctx.beginPath();
-  ctx.moveTo(-35, 0);
-  ctx.lineTo(-50, -15);
-  ctx.lineTo(-50, 15);
-  ctx.closePath();
-  ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(-35, 0);
+    ctx.lineTo(-50, -15);
+    ctx.lineTo(-50, 15);
+    ctx.closePath();
+    ctx.fill();
 
-  // Eye
-  ctx.fillStyle = '#fff';
-  ctx.beginPath();
-  ctx.arc(30, -2, 4, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = '#000';
-  ctx.beginPath();
-  ctx.arc(31, -2, 2, 0, Math.PI * 2);
-  ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(30, -2, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#000';
+    ctx.beginPath();
+    ctx.arc(31, -2, 2, 0, Math.PI * 2);
+    ctx.fill();
 
-  ctx.restore();
+    ctx.restore();
+  }
 }
 
 function drawJellyfish(j) {
   const offsetX = parallaxX * LAYERS.mid.parallax;
   const offsetY = parallaxY * LAYERS.mid.parallax;
-  const x = j.x + offsetX + 30;
-  const y = j.y + offsetY + 20;
+  const x = j.x + offsetX;
+  const y = j.y + offsetY;
 
-  ctx.save();
+  if (jellyImg.complete && jellyImg.naturalWidth > 0) {
+    ctx.drawImage(jellyImg, x, y, 70, 80);
+  } else {
+    // Fallback: draw jellyfish shape
+    const cx = x + 30;
+    const cy = y + 20;
 
-  // Bell (translucent pink/purple)
-  const gradient = ctx.createRadialGradient(x, y, 0, x, y, 30);
-  gradient.addColorStop(0, 'rgba(255, 150, 220, 0.8)');
-  gradient.addColorStop(1, 'rgba(180, 100, 200, 0.4)');
+    ctx.save();
 
-  ctx.fillStyle = gradient;
-  ctx.beginPath();
-  ctx.ellipse(x, y, 28, 20, 0, Math.PI, 0);
-  ctx.fill();
+    const gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, 30);
+    gradient.addColorStop(0, 'rgba(255, 150, 220, 0.8)');
+    gradient.addColorStop(1, 'rgba(180, 100, 200, 0.4)');
 
-  // Tentacles
-  ctx.strokeStyle = 'rgba(200, 150, 255, 0.6)';
-  ctx.lineWidth = 3;
-  for (let i = 0; i < 5; i++) {
-    const tx = x - 20 + i * 10;
-    const wave = Math.sin(Date.now() / 200 + i) * 5;
+    ctx.fillStyle = gradient;
     ctx.beginPath();
-    ctx.moveTo(tx, y);
-    ctx.quadraticCurveTo(tx + wave, y + 30, tx - wave, y + 50);
-    ctx.stroke();
-  }
+    ctx.ellipse(cx, cy, 28, 20, 0, Math.PI, 0);
+    ctx.fill();
 
-  ctx.restore();
+    ctx.strokeStyle = 'rgba(200, 150, 255, 0.6)';
+    ctx.lineWidth = 3;
+    for (let i = 0; i < 5; i++) {
+      const tx = cx - 20 + i * 10;
+      const wave = Math.sin(Date.now() / 200 + i) * 5;
+      ctx.beginPath();
+      ctx.moveTo(tx, cy);
+      ctx.quadraticCurveTo(tx + wave, cy + 30, tx - wave, cy + 50);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
 }
 
 function drawReef(r) {
