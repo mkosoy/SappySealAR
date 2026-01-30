@@ -80,13 +80,16 @@ const AR_SENSITIVITY = 10;  // How much tank moves per degree of tilt (higher = 
 let orientationEventCount = 0;
 let orientationSetupAttempted = false;
 
-// Motion detection - fish scatter from real movement
+// Motion detection - fish pushed by real movement
 let motionCanvas, motionCtx;
 let prevFrameData = null;
 let motionX = 0, motionY = 0;  // Where motion was detected (screen coords)
+let prevMotionX = 0, prevMotionY = 0;  // Previous position for velocity calc
+let motionVelX = 0, motionVelY = 0;    // Motion velocity (direction of wave)
 let motionIntensity = 0;       // How much motion (0-1)
 const MOTION_THRESHOLD = 30;   // Pixel diff threshold
-const MOTION_DECAY = 0.92;     // How fast motion fades
+const MOTION_DECAY = 0.9;      // How fast motion fades
+const MOTION_VEL_DECAY = 0.85; // How fast velocity fades
 let motionFrameSkip = 0;       // Process every N frames for performance
 
 // Collections
@@ -284,11 +287,22 @@ function detectMotion() {
 
       if (motionPixels > 80) {  // Significant motion detected
         // Convert to screen coordinates
-        motionX = (motionSumX / motionPixels) / motionCanvas.width * canvas.width;
-        motionY = (motionSumY / motionPixels) / motionCanvas.height * canvas.height;
-        motionIntensity = Math.min(1, motionPixels / 400);
+        const newMotionX = (motionSumX / motionPixels) / motionCanvas.width * canvas.width;
+        const newMotionY = (motionSumY / motionPixels) / motionCanvas.height * canvas.height;
+
+        // Calculate velocity (direction of motion) - this is key for push effect
+        motionVelX = (newMotionX - prevMotionX) * 0.5 + motionVelX * 0.5;  // Smooth
+        motionVelY = (newMotionY - prevMotionY) * 0.5 + motionVelY * 0.5;
+
+        prevMotionX = motionX;
+        prevMotionY = motionY;
+        motionX = newMotionX;
+        motionY = newMotionY;
+        motionIntensity = Math.min(1, motionPixels / 300);
       } else {
         motionIntensity *= MOTION_DECAY;  // Fade out gradually
+        motionVelX *= MOTION_VEL_DECAY;   // Velocity fades too
+        motionVelY *= MOTION_VEL_DECAY;
       }
     }
 
@@ -298,18 +312,19 @@ function detectMotion() {
   }
 }
 
-// Apply flee behavior to an entity based on detected motion
-function applyMotionFlee(entity, fleeStrength = 5) {
-  if (motionIntensity < 0.25) return;  // Not enough motion
+// Push entity in direction of detected motion (wave up → fish move up)
+function applyMotionPush(entity, pushStrength = 10) {
+  if (motionIntensity < 0.15) return;  // Not enough motion
 
   const dx = entity.x - motionX;
   const dy = entity.y - motionY;
   const dist = Math.sqrt(dx * dx + dy * dy);
 
-  if (dist < 250 && dist > 0) {  // Within flee radius
-    const strength = motionIntensity * (1 - dist / 250) * fleeStrength;
-    entity.x += (dx / dist) * strength;
-    entity.y += (dy / dist) * strength;
+  if (dist < 350) {  // Within push radius
+    const falloff = 1 - dist / 350;
+    // Push in direction of motion velocity (wave direction)
+    entity.x += motionVelX * falloff * pushStrength * motionIntensity;
+    entity.y += motionVelY * falloff * pushStrength * motionIntensity;
   }
 }
 
@@ -1334,20 +1349,21 @@ function gameLoop() {
   // Detect motion in camera feed (for fish scatter effect)
   detectMotion();
 
-  // DEBUG: Show gyroscope status (remove after fixing)
+  // DEBUG: Show gyroscope status (bottom-left to avoid score overlap)
+  const debugY = canvas.height - 145;
   ctx.save();
   ctx.fillStyle = 'rgba(0,0,0,0.85)';
-  ctx.fillRect(5, 5, 260, 130);
+  ctx.fillRect(5, debugY, 280, 140);
   ctx.fillStyle = orientationEventCount > 0 ? '#0f0' : '#f00';
   ctx.font = '12px monospace';
-  ctx.fillText(`Gyro: ${orientationEventCount} events ${orientationSetupAttempted ? '(setup OK)' : '(NOT setup)'}`, 10, 22);
+  ctx.fillText(`Gyro: ${orientationEventCount} ${orientationSetupAttempted ? '(setup OK)' : '(NOT setup)'}`, 10, debugY + 17);
   ctx.fillStyle = '#0f0';
-  ctx.fillText(`Beta: ${currentBeta.toFixed(1)}  Gamma: ${currentGamma.toFixed(1)}`, 10, 38);
-  ctx.fillText(`Anchored: ${isAnchored}  Scale: ${tankScale.toFixed(2)}`, 10, 54);
-  ctx.fillText(`Tank: (${tankCenterX.toFixed(0)}, ${tankCenterY.toFixed(0)})`, 10, 70);
-  ctx.fillText(`Anchor: (${anchorScreenX.toFixed(0)}, ${anchorScreenY.toFixed(0)})`, 10, 86);
-  ctx.fillText(`Seal: (${sealX?.toFixed(0) || 0}, ${sealY?.toFixed(0) || 0})`, 10, 102);
-  ctx.fillText(`Motion: ${(motionIntensity * 100).toFixed(0)}%`, 10, 118);
+  ctx.fillText(`Beta: ${currentBeta.toFixed(1)}  Gamma: ${currentGamma.toFixed(1)}`, 10, debugY + 34);
+  ctx.fillText(`Anchored: ${isAnchored}  Scale: ${tankScale.toFixed(2)}`, 10, debugY + 51);
+  ctx.fillText(`Tank: (${tankCenterX.toFixed(0)}, ${tankCenterY.toFixed(0)})`, 10, debugY + 68);
+  ctx.fillText(`Anchor: (${anchorScreenX.toFixed(0)}, ${anchorScreenY.toFixed(0)})`, 10, debugY + 85);
+  ctx.fillText(`Seal: (${sealX?.toFixed(0) || 0}, ${sealY?.toFixed(0) || 0})`, 10, debugY + 102);
+  ctx.fillText(`Motion: ${(motionIntensity * 100).toFixed(0)}% vel:(${motionVelX.toFixed(0)},${motionVelY.toFixed(0)})`, 10, debugY + 119);
   ctx.restore();
 
   // Visual feedback: Show motion detection area
@@ -1377,21 +1393,21 @@ function gameLoop() {
     updateJellyfish();
   }
 
-  // Move entities (X movement) and apply motion flee
+  // Move entities (X movement) and apply motion push (wave direction)
   if (gameRunning && !isPaused) {
     backFish.forEach(f => {
       f.x -= f.speed;
-      applyMotionFlee(f, 3);  // Background fish flee gently
+      applyMotionPush(f, 6);  // Background fish pushed gently
     });
     collectibles.forEach(c => {
       c.x -= c.speed;
-      applyMotionFlee(c, 6);  // Fish flee from motion
+      applyMotionPush(c, 12);  // Fish pushed strongly by waves
     });
     puffers.forEach(p => {
       p.x -= p.speed;
-      applyMotionFlee(p, 4);  // Puffers flee moderately
+      applyMotionPush(p, 8);  // Puffers pushed moderately
     });
-    reefs.forEach(r => r.x -= r.speed);  // Reefs don't flee
+    reefs.forEach(r => r.x -= r.speed);  // Reefs don't move
   }
 
   // ============ FISHTANK RENDERING ============
